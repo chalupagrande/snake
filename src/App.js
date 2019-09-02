@@ -6,7 +6,7 @@ function App() {
   let [pause, setPause] = useState(false)
   return (
     <div className="App">
-      <h1>HI</h1>
+      <h1>SNAKE Neural Net genetic algorithm</h1>
       <button onClick={() => setPause(!pause)}>pause</button>
       <P5Wrapper sketch={snake} pause={pause} />
     </div>
