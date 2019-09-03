@@ -7,9 +7,9 @@ function sketch (p) {
   canvasSize = 400,
   pause = false,
   percentOfFittest = 0.10,
-  mutatePercentage = 0.2,
+  mutatePercentage = 0.1,
   popSize = 100,
-  gameSize = 7,
+  gameSize = 10,
   gameSpeed = 0,
   scl = canvasSize / gameSize;
 
@@ -26,7 +26,7 @@ function sketch (p) {
     constructor(brain) {
       // let initialPos = p.createVector(p.floor(p.random(gameSize)), p.floor(p.random(gameSize)))
       let initialPos = p.createVector(0,0)
-      this.brain = brain || new Architect.Perceptron(gameSize * gameSize, 50, 20, 4);
+      this.brain = brain || new Architect.Perceptron(16, 16, 16, 4);
       this.headPos = initialPos
       this.positions = [initialPos]
       this.heading = p.createVector(1,0)
@@ -72,8 +72,54 @@ function sketch (p) {
       else this.setHeading(1,0)
     }
 
+    setFitness(s){
+      this.fitness = s
+    }
+
     strengthen() {
       this.score += 1
+    }
+
+    look(game) {
+      // look forward
+      const {w,h} = game.opts
+      let result = {}
+      for(let xDir = -1; xDir <= 1; xDir++) {
+        for(let yDir = -1; yDir <= 1; yDir++) {
+          if(xDir === 0 && yDir === 0) continue
+          // init result variables
+          result[`V${xDir}.${yDir}`] = null
+          result[`D${xDir}.${yDir}`] = 0
+          let dir = p.createVector(xDir, yDir)
+          let last = this.headPos
+          while (true){
+            let scanner = p5.Vector.add(dir, last)
+            // out of bounds
+            if(scanner.x >= w || scanner.x < 0 || scanner.y >= h || scanner.y < 0) {
+              result[`V${xDir}.${yDir}`] = -1
+              result[`D${xDir}.${yDir}`] += 1
+              break;
+
+            } else {
+              let val = game.get(scanner)
+              result[`V${xDir}.${yDir}`] = val
+              result[`D${xDir}.${yDir}`] += 1
+              last = scanner
+              if(val === 1 || val === -1) break
+            }
+          }
+        }
+      }
+      // result === human decipherable object
+      // ensure inputs are in the same
+      let keys = Object.keys(result).sort()
+      let inputs = keys.map(k => {
+        let val = result[k]
+        if(k[0] === 'D') return val/gameSize
+        return val
+      })
+      return {inputs, result}
+      // normalize
     }
   }
 
@@ -103,41 +149,6 @@ function sketch (p) {
     addSnake(snake){
       this.snake = snake
       snake.positions.forEach(pos => this.set(pos, 0.5))
-    }
-
-    look() {
-      // look forward
-      debugger
-      let result = {}
-      for(let xDir = -1; xDir <= 1; xDir++) {
-        for(let yDir = -1; yDir <= 1; yDir++) {
-          // init result variables
-          result[`${xDir},${yDir}-Value`] = -1
-          result[`${xDir},${yDir}-Distance`] = 0
-          let dir = p.createVector(xDir, yDir)
-          let last = this.snake.headPos
-          let canSee = true
-          while (canSee){
-            let scanner = p5.Vector.add(dir, last)
-            // out of bounds
-            if(scanner.x >= this.opts.w || scanner.x < 0 || scanner.y >= this.opts.h || scanner.y < 0) {
-              canSee = false
-              break;
-            } else {
-              let val = this.get(scanner)
-              result[`${xDir},${yDir}-Value`] = val
-              result[`${xDir},${yDir}-Distance`] += 1
-              last = scanner
-              if(val === 1 || val === -1){
-                canSee = false
-                break;
-              }
-            }
-          }
-        }
-      }
-      debugger
-      return result
     }
 
     newBait(){
@@ -193,6 +204,8 @@ function sketch (p) {
 
   class Generation {
     constructor(popSize) {
+      this.highscore = 0
+      this.fittest = null
       this.population = [...Array(popSize)].map(()=> new Snake())
       this.citizenIndex = -1
       this.generationCount = 1
@@ -207,24 +220,35 @@ function sketch (p) {
       return this.population[this.citizenIndex]
     }
 
+    fitnessFunction(snake) {
+      return (snake.score + 1) * snake.life
+    }
+
+    calcPopFitness(){
+      // calculate population highscore
+      let popHighscore = this.population.reduce((hs,s) =>
+        Math.max(this.fitnessFunction(s), hs), 0)
+      // reset overall highscore if its higher
+      if(popHighscore > this.highscore) this.highscore = popHighscore
+      // determine snake fitness based on highscore
+      this.population.forEach(s => s.setFitness(s.score/ popHighscore))
+      console.log(`pop High: ${popHighscore}, overall: ${this.highscore}`)
+    }
+
     prepNextGeneration() {
+      debugger
       this.generationCount += 1
       // calculate fitness
-      let highscore = this.population.reduce((score,s) => Math.max(score,s.life * (s.score + 1)), 0)
-      console.log(`highscore: ${highscore}`)
-      let sortPop = this.population.map(s => {
-        s.fitness = (s.life * (s.score + 1))/highscore
-        return s
-      })
+      this.calcPopFitness()
       // sort based on fitness
+      let sortPop = [...this.population]
       sortPop.sort((a,b) => b.fitness - a.fitness)
       // take only the fittest based on pecentOfFittest
       let fitPop = sortPop.slice(0, p.floor(percentOfFittest * sortPop.length))
       // crossover
-      // let crossed = this.crossover(fitPop)
-      // debugger
-      let brains = fitPop.map(s => s.brain.toJSON())
-      let mutated = this.mutate(brains)
+      let crossed = this.crossover(fitPop)
+      // let brains = fitPop.map(s => s.brain.toJSON())
+      let mutated = this.mutate(crossed)
       this.population = mutated
       console.log(`GENERATION: ${this.generationCount}, pop: ${this.population.length}`)
     }
@@ -253,16 +277,16 @@ function sketch (p) {
         b2.connections = [...b2ConsS2, ...b1ConsS2]
 
         //slice Neurons
-        let neuIndex = p.floor(b1.neurons.length * brainPercent)
-        let invNeuIndex = b1.neurons.length - p.floor(b1.neurons.length * brainPercent)
+        // let neuIndex = p.floor(b1.neurons.length * brainPercent)
+        // let invNeuIndex = b1.neurons.length - p.floor(b1.neurons.length * brainPercent)
 
-        let b1NeuS1 = b1.neurons.slice(0, neuIndex)
-        let b2NeuS1 = b2.neurons.slice(neuIndex)
-        let b1NeuS2 = b1.neurons.slice(invNeuIndex)
-        let b2NeuS2 = b2.neurons.slice(0, invNeuIndex)
+        // let b1NeuS1 = b1.neurons.slice(0, neuIndex)
+        // let b2NeuS1 = b2.neurons.slice(neuIndex)
+        // let b1NeuS2 = b1.neurons.slice(invNeuIndex)
+        // let b2NeuS2 = b2.neurons.slice(0, invNeuIndex)
 
-        b1.neurons = [...b1NeuS1, ...b2NeuS1]
-        b2.neurons = [...b2NeuS2, ...b1NeuS2]
+        // b1.neurons = [...b1NeuS1, ...b2NeuS1]
+        // b2.neurons = [...b2NeuS2, ...b1NeuS2]
 
         crossed.push(b1, b2)
       }
@@ -276,7 +300,8 @@ function sketch (p) {
       for(let i = 0; i < toMutate.length; i++){
         let brain = toMutate[i]
         let cons = [...brain.connections]
-        let neurons = [...brain.neurons]
+        // let neurons = [...brain.neurons]
+
         // mutate their brains for X number of Children
         for(let k = 0; k < numOffspring; k++){
           //mutate connections
@@ -288,13 +313,13 @@ function sketch (p) {
           }
           brain.connections = cons
           // mutate neurons
-          for(let j = 0; j < neurons.length; j++){
-            let ron = neurons[j]
-            if(Math.random() < mutatePercentage){
-              ron.bias = p.random(-1, 1)
-            }
-          }
-          brain.neurons = neurons
+          // for(let j = 0; j < neurons.length; j++){
+          //   let ron = neurons[j]
+          //   if(Math.random() < mutatePercentage){
+          //     ron.bias = p.random(-1, 1)
+          //   }
+          // }
+          // brain.neurons = neurons
           // create a new child
           offspring.push(new Snake(Network.fromJSON(brain)))
         }
@@ -324,8 +349,8 @@ function sketch (p) {
 
   p.draw = function () {
     p.frameRate(gameSpeed || 60)
-    game.snake.think(game.board)
-    // console.log('looking', game.look(game.snake))
+    let {inputs} = game.snake.look(game)
+    game.snake.think(inputs)
 
     if(pause) return p.noLoop()
 
