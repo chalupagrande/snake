@@ -7,9 +7,9 @@ function sketch (p) {
   canvasSize = 400,
   pause = false,
   percentOfFittest = 0.10,
-  mutatePercentage = 0.1,
-  popSize = 100,
-  gameSize = 10,
+  mutatePercentage = 0.15,
+  popSize = 1000,
+  gameSize = 9,
   gameSpeed = 0,
   scl = canvasSize / gameSize;
 
@@ -25,11 +25,14 @@ function sketch (p) {
   class Snake {
     constructor(brain) {
       // let initialPos = p.createVector(p.floor(p.random(gameSize)), p.floor(p.random(gameSize)))
+      // let initialPos = p.createVector(p.floor((gameSize-1)/2), p.floor((gameSize-1)/2))
       let initialPos = p.createVector(0,0)
-      this.brain = brain || new Architect.Perceptron(16, 16, 16, 4);
+      let randomVector = p.random([1,0],[0,1], [-1,0], [0,-1])
+      this.brain = brain || new Architect.Perceptron(16, 16, 8, 4);
       this.headPos = initialPos
       this.positions = [initialPos]
-      this.heading = p.createVector(1,0)
+
+      this.heading = p.createVector(...randomVector)
       this.length = this.positions.length
       this.shouldGrow = false
       this.life = 100
@@ -148,13 +151,12 @@ function sketch (p) {
 
     addSnake(snake){
       this.snake = snake
-      snake.positions.forEach(pos => this.set(pos, 0.5))
+      snake.positions.forEach(pos => this.set(pos, -1))
     }
 
     newBait(){
-      if(this.baitLocation) this.set(this.baitLocation, 0.5)
       let curVal = -1, pos;
-      while(curVal === -1 || curVal === 1 || curVal === 0.5){
+      while(curVal === -1 || curVal === 1){
         let x = p.floor(p.random(this.opts.w))
         let y = p.floor(p.random(this.opts.h))
         pos = p.createVector(x,y)
@@ -180,7 +182,6 @@ function sketch (p) {
       try {
         prevPos.forEach(pre => this.set(pre, 0))
         curPos.forEach(cur => this.set(cur, -1))
-        this.set(curPos[0], 0.5)
       } catch {
         return -1
       }
@@ -236,7 +237,6 @@ function sketch (p) {
     }
 
     prepNextGeneration() {
-      debugger
       this.generationCount += 1
       // calculate fitness
       this.calcPopFitness()
@@ -321,7 +321,8 @@ function sketch (p) {
           // }
           // brain.neurons = neurons
           // create a new child
-          offspring.push(new Snake(Network.fromJSON(brain)))
+          let newSnake = new Snake(Network.fromJSON(brain))
+          offspring.push(newSnake)
         }
       }
       return offspring
@@ -351,6 +352,7 @@ function sketch (p) {
     p.frameRate(gameSpeed || 60)
     let {inputs} = game.snake.look(game)
     game.snake.think(inputs)
+    // console.table(game.board)
 
     if(pause) return p.noLoop()
 
