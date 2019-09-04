@@ -1,17 +1,18 @@
 import p5 from 'p5'
-import {Architect, Network} from 'synaptic'
+import {Network, Architect} from 'synaptic'
 
 function sketch (p) {
   let game,
   generation,
   canvasSize = 400,
   pause = false,
-  percentOfFittest = 0.10,
+  percentOfFittest = 0.20,
   mutatePercentage = 0.15,
-  popSize = 1000,
+  popSize = 100,
   gameSize = 9,
   gameSpeed = 0,
   scl = canvasSize / gameSize;
+
 
 
   /**
@@ -24,13 +25,12 @@ function sketch (p) {
 
   class Snake {
     constructor(brain) {
-      // let initialPos = p.createVector(p.floor(p.random(gameSize)), p.floor(p.random(gameSize)))
-      // let initialPos = p.createVector(p.floor((gameSize-1)/2), p.floor((gameSize-1)/2))
       let initialPos = p.createVector(0,0)
       let randomVector = p.random([1,0],[0,1], [-1,0], [0,-1])
-      this.brain = brain || new Architect.Perceptron(16, 16, 8, 4);
+      this.brain = brain || new Architect.Perceptron(16, 8, 4);
       this.headPos = initialPos
       this.positions = [initialPos]
+
 
       this.heading = p.createVector(...randomVector)
       this.length = this.positions.length
@@ -64,9 +64,7 @@ function sketch (p) {
       this.shouldGrow = true
     }
 
-    think(board) {
-      let inputs = []
-      board.forEach(r => inputs = inputs.concat(r))
+    think(inputs) {
       let guess = this.brain.activate(inputs)
       let i = guess.indexOf(Math.max(...guess))
       if(i === 0) this.setHeading(0,-1)
@@ -245,10 +243,13 @@ function sketch (p) {
       sortPop.sort((a,b) => b.fitness - a.fitness)
       // take only the fittest based on pecentOfFittest
       let fitPop = sortPop.slice(0, p.floor(percentOfFittest * sortPop.length))
+
       // crossover
       let crossed = this.crossover(fitPop)
-      // let brains = fitPop.map(s => s.brain.toJSON())
       let mutated = this.mutate(crossed)
+      // console.log(mutated)
+      // create a new child
+      debugger
       this.population = mutated
       console.log(`GENERATION: ${this.generationCount}, pop: ${this.population.length}`)
     }
@@ -259,14 +260,12 @@ function sketch (p) {
         let s1 = fitPop[i]
         let s2 = fitPop[i+1] || fitPop[0]
         // calculate percentage of fitter brain to take
-        let diff = Math.abs(s1.fitness - s2.fitness)
-        let brainPercent = Math.min(0.5 + diff, 1)
         // get their json
         let b1 = s1.brain.toJSON()
         let b2 = s2.brain.toJSON()
         // calculate index of connections to slice from
-        let consIndex = p.floor(b1.connections.length * brainPercent)
-        let invConsIndex = b1.connections.length - p.floor(b1.connections.length * brainPercent)
+        let consIndex = p.random(b1.connections.length)
+        let invConsIndex = b1.connections.length - consIndex
         // slice connections
         let b1ConsS1 = b1.connections.slice(0, consIndex)
         let b2ConsS1 = b2.connections.slice(consIndex)
@@ -277,16 +276,29 @@ function sketch (p) {
         b2.connections = [...b2ConsS2, ...b1ConsS2]
 
         //slice Neurons
-        // let neuIndex = p.floor(b1.neurons.length * brainPercent)
-        // let invNeuIndex = b1.neurons.length - p.floor(b1.neurons.length * brainPercent)
+        let neuIndex = p.random(b1.neurons.length)
+        let invNeuIndex = b1.neurons.length - neuIndex
 
-        // let b1NeuS1 = b1.neurons.slice(0, neuIndex)
-        // let b2NeuS1 = b2.neurons.slice(neuIndex)
-        // let b1NeuS2 = b1.neurons.slice(invNeuIndex)
-        // let b2NeuS2 = b2.neurons.slice(0, invNeuIndex)
+        let b1NeuS1 = b1.neurons.slice(0, neuIndex)
+        let b2NeuS1 = b2.neurons.slice(neuIndex)
+        let b1NeuS2 = b1.neurons.slice(invNeuIndex)
+        let b2NeuS2 = b2.neurons.slice(0, invNeuIndex)
 
-        // b1.neurons = [...b1NeuS1, ...b2NeuS1]
-        // b2.neurons = [...b2NeuS2, ...b1NeuS2]
+        b1.neurons = [...b1NeuS1, ...b2NeuS1]
+        b2.neurons = [...b2NeuS2, ...b1NeuS2]
+        // reset activation values
+        b1.neurons = b1.neurons.map(n => {
+          n.state = 0
+          n.old = 0
+          n.activation = 0
+          return n
+        })
+        b1.neurons = b1.neurons.map(n => {
+          n.state = 0
+          n.old = 0
+          n.activation = 0
+          return n
+        })
 
         crossed.push(b1, b2)
       }
@@ -300,29 +312,29 @@ function sketch (p) {
       for(let i = 0; i < toMutate.length; i++){
         let brain = toMutate[i]
         let cons = [...brain.connections]
-        // let neurons = [...brain.neurons]
+        let neurons = [...brain.neurons]
 
         // mutate their brains for X number of Children
-        for(let k = 0; k < numOffspring; k++){
+        for(let kid = 0; kid < numOffspring; kid++){
           //mutate connections
           for(let j = 0; j < cons.length; j++){
             let con = cons[j]
             if(Math.random() < mutatePercentage){
-              con.weight = p.random(-1, 1)
+              con.weight = p.random(-6, 6)
             }
           }
           brain.connections = cons
           // mutate neurons
-          // for(let j = 0; j < neurons.length; j++){
-          //   let ron = neurons[j]
-          //   if(Math.random() < mutatePercentage){
-          //     ron.bias = p.random(-1, 1)
-          //   }
-          // }
-          // brain.neurons = neurons
-          // create a new child
-          let newSnake = new Snake(Network.fromJSON(brain))
-          offspring.push(newSnake)
+          for(let j = 0; j < neurons.length; j++){
+            let ron = neurons[j]
+            if(Math.random() < mutatePercentage){
+              ron.bias = p.random(-1, 1)
+            }
+          }
+          brain.neurons = neurons
+          let net = Architect.Perceptron.fromJSON(brain)
+          debugger
+          offspring.push(new Snake())
         }
       }
       return offspring
@@ -352,7 +364,6 @@ function sketch (p) {
     p.frameRate(gameSpeed || 60)
     let {inputs} = game.snake.look(game)
     game.snake.think(inputs)
-    // console.table(game.board)
 
     if(pause) return p.noLoop()
 
