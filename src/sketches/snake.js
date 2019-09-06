@@ -6,10 +6,11 @@ function sketch (p) {
   generation,
   canvasSize = 400,
   pause = false,
-  percentOfFittest = 0.20,
+  percentOfFittest = 0.1,
   mutatePercentage = 0.1,
+  numGenerations = 500,
   popSize = 100,
-  gameSize = 9,
+  gameSize = 10,
   gameSpeed = 0,
   scl = canvasSize / gameSize;
 
@@ -25,14 +26,14 @@ function sketch (p) {
 
   class Snake {
     constructor(brain) {
-      let initialPos = p.createVector(0,0)
-      let randomVector = p.random([1,0],[0,1], [-1,0], [0,-1])
-      this.brain = brain || new NN({input: 16, hidden: [8,6], output: 4})
+      let half = p.floor((gameSize-1)/2)
+      let initialPos = p.createVector(half, half)
+      this.brain = brain || new NN({input: 16, hidden: [8], output: 4})
       this.headPos = initialPos
       this.positions = [initialPos]
 
 
-      this.heading = p.createVector(...randomVector)
+      this.heading = p.createVector(1,0)
       this.length = this.positions.length
       this.shouldGrow = false
       this.life = 100
@@ -84,27 +85,27 @@ function sketch (p) {
     look(game) {
       // look forward
       const {w,h} = game.opts
-      let result = {}
+      let raw = {}
       for(let xDir = -1; xDir <= 1; xDir++) {
         for(let yDir = -1; yDir <= 1; yDir++) {
           if(xDir === 0 && yDir === 0) continue
           // init result variables
-          result[`V${xDir}.${yDir}`] = null
-          result[`D${xDir}.${yDir}`] = 0
+          raw[`V${xDir}.${yDir}`] = null
+          raw[`D${xDir}.${yDir}`] = 0
           let dir = p.createVector(xDir, yDir)
           let last = this.headPos
           while (true){
             let scanner = p5.Vector.add(dir, last)
             // out of bounds
             if(scanner.x >= w || scanner.x < 0 || scanner.y >= h || scanner.y < 0) {
-              result[`V${xDir}.${yDir}`] = -1
-              result[`D${xDir}.${yDir}`] += 1
+              raw[`V${xDir}.${yDir}`] = -1
+              raw[`D${xDir}.${yDir}`] += 1
               break;
 
             } else {
               let val = game.get(scanner)
-              result[`V${xDir}.${yDir}`] = val
-              result[`D${xDir}.${yDir}`] += 1
+              raw[`V${xDir}.${yDir}`] = val
+              raw[`D${xDir}.${yDir}`] += 1
               last = scanner
               if(val === 1 || val === -1) break
             }
@@ -113,18 +114,28 @@ function sketch (p) {
       }
       // result === human decipherable object
       // ensure inputs are in the same
-      let keys = Object.keys(result).sort()
-      let inputs = keys.map(k => {
-        let val = result[k]
-        if(k[0] === 'D') return val/gameSize
-        return val
-      })
-      return {inputs, result}
-      // normalize
+      let inputs = [
+        raw['D0.1']/gameSize,
+        raw['V0.1'],
+        raw['D0.-1']/gameSize,
+        raw['V0.-1'],
+        raw['D1.0']/gameSize,
+        raw['V1.0'],
+        raw['D1.1']/gameSize,
+        raw['V1.1'],
+        raw['D1.-1']/gameSize,
+        raw['V1.-1'],
+        raw['D-1.0']/gameSize,
+        raw['V-1.0'],
+        raw['D-1.1']/gameSize,
+        raw['V-1.1'],
+        raw['D-1.-1']/gameSize,
+        raw['V-1.-1']]
+      return {inputs, raw}
     }
 
     reproduce(partner) {
-      return this.brain.mix(partner.brain)
+      return this.brain.mix(this, partner)
     }
 
     mutate(rate) {
@@ -216,50 +227,95 @@ function sketch (p) {
       this.population = [...Array(popSize)].map(()=> new Snake())
       this.citizenIndex = -1
       this.generationCount = 1
+      this.scores = []
     }
 
     next(){
       this.citizenIndex += 1
       if(this.citizenIndex >= this.population.length) {
+        if(this.generationCount > numGenerations) {
+          pause = true
+          console.log(this.scores)
+          debugger
+        }
         this.citizenIndex = 0
         this.prepNextGeneration()
       }
       return this.population[this.citizenIndex]
     }
 
-    fitnessFunction(snake) {
+    scoreFunc(snake) {
       return (snake.score + 1) * snake.life
     }
 
     calcPopFitness(){
       // calculate population highscore
       let popHighscore = this.population.reduce((hs,s) =>
-        Math.max(this.fitnessFunction(s), hs), 0)
-      // reset overall highscore if its higher
-      if(popHighscore > this.highscore) this.highscore = popHighscore
+        Math.max(this.scoreFunc(s), hs), 0)
       // determine snake fitness based on highscore
-      console.log(popHighscore, this.highscore)
-      return this.population.map(s => {
-        s.setFitness(this.fitnessFunction(s)/ popHighscore)
+      let scoredPop = this.population.map(s => {
+        s.setFitness(this.scoreFunc(s)/ popHighscore)
         return s
       })
+      if(popHighscore > this.highscore){
+        this.highscore = popHighscore
+        this.fittest = scoredPop.find(s => {
+          return this.scoreFunc(s) === popHighscore
+        })
+      }
+      console.log(`POP: ${popHighscore}, OVERALL: ${this.highscore}, FITTEST: ${this.fittest.score}`)
+      return scoredPop
     }
 
     prepNextGeneration() {
       this.generationCount += 1
       // calculate fitness
-      let fitPop = this.calcPopFitness()
-      fitPop.sort((a,b)=> b.fitness - a.fitness)
-      let elite = fitPop.slice(0, percentOfFittest * fitPop.length)
+      let sortedPop = this.calcPopFitness()
+      // sort poulation
+      sortedPop.sort((a,b)=> b.fitness - a.fitness)
+      // chose based on fitness
+      let numToChose = percentOfFittest * sortedPop.length
+      let chosen = []
+      for(let i = 0; i < numToChose; i++){
+        chosen.push(this.chooseByFitness(sortedPop))
+      }
+      // create new population based off mutations
       let newPop = []
-      let numChildren = p.floor(fitPop.length / elite.length)
-      elite.forEach(s => {
+      let numChildren = p.floor(sortedPop.length / chosen.length)
+      chosen.forEach(s => {
         for(let n = 0; n < numChildren; n++){
           newPop.push(s.mutate(mutatePercentage))
         }
       })
       this.population = newPop
+
+      //log
       console.log(`GENERATION: ${this.generationCount}, pop: ${this.population.length}`)
+      chosen[0].brain.log()
+    }
+
+    /**
+     *
+     * @param {array} population - SORTED population
+     */
+    chooseByFitness(population) {
+      let weights = []
+      let total_weight = population.reduce((a, s) => {
+        weights.push(s.fitness)
+        return a + s.fitness
+      }, 0)
+
+      let random_num = random(0, total_weight)
+      let weight_sum = 0
+
+      for (let i = 0; i < population.length; i++) {
+        weight_sum += weights[i]
+        weight_sum =  +weight_sum.toFixed(2)
+
+        if (random_num <= weight_sum) {
+          return population[i]
+        }
+      }
     }
   }
 
@@ -283,8 +339,8 @@ function sketch (p) {
   }
 
   p.draw = function () {
-    p.frameRate(gameSpeed || 60)
-    let {inputs} = game.snake.look(game)
+    gameSpeed && p.frameRate(gameSpeed)
+    let {inputs, raw} = game.snake.look(game)
     game.snake.think(inputs)
 
     if(pause) return p.noLoop()
@@ -327,6 +383,10 @@ function sketch (p) {
       snake.setHeading(0,1)
     }
   }
+}
+
+function random(min, max) {
+  return Math.random() * (max - min) + min;
 }
 
 export default sketch

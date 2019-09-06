@@ -64,10 +64,13 @@ class NN {
     })
   }
 
+  reproduce(s1, s2) {
+
+  }
+
   mutate(rate) {
     return tf.tidy(() => {
-      let copy = this.copy()
-      let weights = copy.model.getWeights()
+      let weights = this.model.getWeights()
       let newWeights = weights.map(t => {
         let shape = t.shape
         let weightValues = t.dataSync()
@@ -77,9 +80,13 @@ class NN {
         })
         return tf.tensor(mutatedWeights, shape)
       })
-      copy.model.setWeights(newWeights)
-      return copy
+      this.model.setWeights(newWeights)
+      return this
     })
+  }
+
+  log(){
+    console.log(tf.memory())
   }
 }
 
