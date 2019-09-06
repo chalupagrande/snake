@@ -1,5 +1,5 @@
 import p5 from 'p5'
-import {Network, Architect} from 'synaptic'
+import NN from '../nn'
 
 function sketch (p) {
   let game,
@@ -7,7 +7,7 @@ function sketch (p) {
   canvasSize = 400,
   pause = false,
   percentOfFittest = 0.20,
-  mutatePercentage = 0.15,
+  mutatePercentage = 0.1,
   popSize = 100,
   gameSize = 9,
   gameSpeed = 0,
@@ -27,7 +27,7 @@ function sketch (p) {
     constructor(brain) {
       let initialPos = p.createVector(0,0)
       let randomVector = p.random([1,0],[0,1], [-1,0], [0,-1])
-      this.brain = brain || new Architect.Perceptron(16, 8, 4);
+      this.brain = brain || new NN({input: 16, hidden: [8,6], output: 4})
       this.headPos = initialPos
       this.positions = [initialPos]
 
@@ -65,7 +65,7 @@ function sketch (p) {
     }
 
     think(inputs) {
-      let guess = this.brain.activate(inputs)
+      let guess = this.brain.predict(inputs)
       let i = guess.indexOf(Math.max(...guess))
       if(i === 0) this.setHeading(0,-1)
       else if(i === 1) this.setHeading(0,1)
@@ -121,6 +121,14 @@ function sketch (p) {
       })
       return {inputs, result}
       // normalize
+    }
+
+    reproduce(partner) {
+      return this.brain.mix(partner.brain)
+    }
+
+    mutate(rate) {
+      return new Snake(this.brain.mutate(rate))
     }
   }
 
@@ -230,114 +238,28 @@ function sketch (p) {
       // reset overall highscore if its higher
       if(popHighscore > this.highscore) this.highscore = popHighscore
       // determine snake fitness based on highscore
-      this.population.forEach(s => s.setFitness(s.score/ popHighscore))
-      console.log(`pop High: ${popHighscore}, overall: ${this.highscore}`)
+      console.log(popHighscore, this.highscore)
+      return this.population.map(s => {
+        s.setFitness(this.fitnessFunction(s)/ popHighscore)
+        return s
+      })
     }
 
     prepNextGeneration() {
       this.generationCount += 1
       // calculate fitness
-      this.calcPopFitness()
-      // sort based on fitness
-      let sortPop = [...this.population]
-      sortPop.sort((a,b) => b.fitness - a.fitness)
-      // take only the fittest based on pecentOfFittest
-      let fitPop = sortPop.slice(0, p.floor(percentOfFittest * sortPop.length))
-
-      // crossover
-      let crossed = this.crossover(fitPop)
-      let mutated = this.mutate(crossed)
-      // console.log(mutated)
-      // create a new child
-      debugger
-      this.population = mutated
-      console.log(`GENERATION: ${this.generationCount}, pop: ${this.population.length}`)
-    }
-
-    crossover(fitPop){
-      let crossed = []
-      for(let i = 0; i < fitPop.length; i+=2) {
-        let s1 = fitPop[i]
-        let s2 = fitPop[i+1] || fitPop[0]
-        // calculate percentage of fitter brain to take
-        // get their json
-        let b1 = s1.brain.toJSON()
-        let b2 = s2.brain.toJSON()
-        // calculate index of connections to slice from
-        let consIndex = p.random(b1.connections.length)
-        let invConsIndex = b1.connections.length - consIndex
-        // slice connections
-        let b1ConsS1 = b1.connections.slice(0, consIndex)
-        let b2ConsS1 = b2.connections.slice(consIndex)
-        let b1ConsS2 = b1.connections.slice(invConsIndex)
-        let b2ConsS2 = b2.connections.slice(0,invConsIndex)
-        // recombine connections
-        b1.connections = [...b1ConsS1, ...b2ConsS1]
-        b2.connections = [...b2ConsS2, ...b1ConsS2]
-
-        //slice Neurons
-        let neuIndex = p.random(b1.neurons.length)
-        let invNeuIndex = b1.neurons.length - neuIndex
-
-        let b1NeuS1 = b1.neurons.slice(0, neuIndex)
-        let b2NeuS1 = b2.neurons.slice(neuIndex)
-        let b1NeuS2 = b1.neurons.slice(invNeuIndex)
-        let b2NeuS2 = b2.neurons.slice(0, invNeuIndex)
-
-        b1.neurons = [...b1NeuS1, ...b2NeuS1]
-        b2.neurons = [...b2NeuS2, ...b1NeuS2]
-        // reset activation values
-        b1.neurons = b1.neurons.map(n => {
-          n.state = 0
-          n.old = 0
-          n.activation = 0
-          return n
-        })
-        b1.neurons = b1.neurons.map(n => {
-          n.state = 0
-          n.old = 0
-          n.activation = 0
-          return n
-        })
-
-        crossed.push(b1, b2)
-      }
-      return crossed
-    }
-
-    mutate(toMutate){
-      let offspring = []
-      let numOffspring = p.floor(this.population.length / toMutate.length)
-      // iterate through all the crossed over brains
-      for(let i = 0; i < toMutate.length; i++){
-        let brain = toMutate[i]
-        let cons = [...brain.connections]
-        let neurons = [...brain.neurons]
-
-        // mutate their brains for X number of Children
-        for(let kid = 0; kid < numOffspring; kid++){
-          //mutate connections
-          for(let j = 0; j < cons.length; j++){
-            let con = cons[j]
-            if(Math.random() < mutatePercentage){
-              con.weight = p.random(-6, 6)
-            }
-          }
-          brain.connections = cons
-          // mutate neurons
-          for(let j = 0; j < neurons.length; j++){
-            let ron = neurons[j]
-            if(Math.random() < mutatePercentage){
-              ron.bias = p.random(-1, 1)
-            }
-          }
-          brain.neurons = neurons
-          let net = Architect.Perceptron.fromJSON(brain)
-          debugger
-          offspring.push(new Snake())
+      let fitPop = this.calcPopFitness()
+      fitPop.sort((a,b)=> b.fitness - a.fitness)
+      let elite = fitPop.slice(0, percentOfFittest * fitPop.length)
+      let newPop = []
+      let numChildren = p.floor(fitPop.length / elite.length)
+      elite.forEach(s => {
+        for(let n = 0; n < numChildren; n++){
+          newPop.push(s.mutate(mutatePercentage))
         }
-      }
-      return offspring
+      })
+      this.population = newPop
+      console.log(`GENERATION: ${this.generationCount}, pop: ${this.population.length}`)
     }
   }
 
